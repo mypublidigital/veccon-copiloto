@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { anthropic, ADMIN_MODEL } from "@/lib/anthropic";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { streamText } from "ai";
 import { ADMIN_ANALYST_SYSTEM_PROMPT } from "@/lib/system-prompt";
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -12,8 +15,8 @@ export async function POST(req: NextRequest) {
 
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
 
-  // Check admin role
-  const { data: profile } = await supabase
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
     .from("profiles")
     .select("role")
     .eq("id", user.id)
@@ -24,9 +27,7 @@ export async function POST(req: NextRequest) {
 
   const { messages } = await req.json();
 
-  // Fetch context data to inject into the system prompt
-  const adminClient = createAdminClient();
-
+  // Busca contexto do banco para injetar no system prompt
   const [
     { count: totalUsers },
     { count: totalConversations },
@@ -55,48 +56,48 @@ export async function POST(req: NextRequest) {
 ${
   recentConvs
     ?.map((c: Record<string, unknown>) => {
-      const profile = c.profiles as Record<string, string> | null;
-      return `- "${c.title}" | Usuário: ${profile?.name ?? profile?.email ?? "desconhecido"} | Depto: ${profile?.department ?? "N/D"} | Data: ${new Date(c.created_at as string).toLocaleDateString("pt-BR")}`;
+      const p = c.profiles as Record<string, string> | null;
+      return `- "${c.title}" | Usuário: ${p?.name ?? p?.email ?? "desconhecido"} | Depto: ${p?.department ?? "N/D"} | Data: ${new Date(c.created_at as string).toLocaleDateString("pt-BR")}`;
     })
     .join("\n") ?? "Nenhuma conversa"
-}
-`;
+}`;
 
   const systemPrompt = ADMIN_ANALYST_SYSTEM_PROMPT + "\n\n" + contextData;
 
   const validMessages = (messages as { role: string; content: string }[])
-    .filter((m) => m.role === "user" || m.role === "assistant")
+    .filter(
+      (m) =>
+        (m.role === "user" || m.role === "assistant") &&
+        typeof m.content === "string" &&
+        m.content.trim().length > 0
+    )
     .map((m) => ({
       role: m.role as "user" | "assistant",
-      content: String(m.content),
+      content: m.content,
     }));
 
-  const encoder = new TextEncoder();
+  const anthropicProvider = createAnthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+  });
 
+  const result = streamText({
+    model: anthropicProvider("claude-sonnet-4-6"),
+    system: systemPrompt,
+    messages: validMessages,
+    maxTokens: 2048,
+  });
+
+  const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const response = await anthropic.messages.create({
-          model: ADMIN_MODEL,
-          max_tokens: 2048,
-          system: systemPrompt,
-          messages: validMessages,
-          stream: true,
-        });
-
-        for await (const event of response) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            const data = JSON.stringify({ delta: event.delta.text });
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          }
+        for await (const chunk of result.textStream) {
+          const data = JSON.stringify({ delta: chunk });
+          controller.enqueue(encoder.encode(`data: ${data}\n\n`));
         }
-
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      } catch (error) {
-        console.error("Admin chat error:", error);
+      } catch (err) {
+        console.error("Admin stream error:", err);
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ error: "Erro interno" })}\n\n`)
         );
@@ -109,8 +110,9 @@ ${
   return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }
