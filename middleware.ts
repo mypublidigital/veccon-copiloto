@@ -44,19 +44,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Rota admin: verifica role
-  if (pathname.startsWith("/admin")) {
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-
-    if (profile?.role !== "admin") {
-      return NextResponse.redirect(new URL("/chat", request.url));
-    }
-  }
-
+  // Verificação de role para /admin é feita no Server Component da página
   return supabaseResponse;
 }
 
