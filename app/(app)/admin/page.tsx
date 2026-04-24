@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import AdminPanel from "@/components/admin/AdminPanel";
 
 export default async function AdminPage() {
@@ -11,7 +12,9 @@ export default async function AdminPage() {
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  // Usa service role para garantir leitura sem bloqueio de RLS
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
     .from("profiles")
     .select("role")
     .eq("id", user.id)
