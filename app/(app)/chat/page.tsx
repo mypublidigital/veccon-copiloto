@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { redirect } from "next/navigation";
 import ChatInterface from "@/components/chat/ChatInterface";
 
@@ -11,7 +12,9 @@ export default async function ChatPage() {
 
   if (!user) redirect("/login");
 
-  const { data: profile } = await supabase
+  // Usa service role para garantir leitura de profile sem bloqueio de RLS
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
     .from("profiles")
     .select("*")
     .eq("id", user.id)
