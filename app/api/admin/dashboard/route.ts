@@ -10,7 +10,8 @@ export async function GET() {
 
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
 
-  const { data: profile } = await supabase
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
     .from("profiles")
     .select("role")
     .eq("id", user.id)
@@ -19,7 +20,6 @@ export async function GET() {
   if (profile?.role !== "admin")
     return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
 
-  const adminClient = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
 
   const [

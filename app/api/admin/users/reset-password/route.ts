@@ -10,7 +10,8 @@ export async function POST(req: NextRequest) {
 
   if (!user) return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
 
-  const { data: profile } = await supabase
+  const adminClient = createAdminClient();
+  const { data: profile } = await adminClient
     .from("profiles")
     .select("role")
     .eq("id", user.id)
@@ -28,7 +29,6 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const adminClient = createAdminClient();
   const { error } = await adminClient.auth.admin.updateUserById(userId, {
     password,
   });
