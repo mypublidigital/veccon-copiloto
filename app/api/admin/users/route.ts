@@ -58,17 +58,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: authError.message }, { status: 400 });
   }
 
-  // Create profile
-  const { error: profileError } = await adminClient.from("profiles").insert({
-    id: authUser.user.id,
-    email,
-    name: name || null,
-    role: role || "user",
-    department: department || null,
-  });
+  // Upsert profile — trigger handle_new_user pode ter criado o profile automaticamente
+  const { error: profileError } = await adminClient
+    .from("profiles")
+    .upsert(
+      {
+        id: authUser.user.id,
+        email,
+        name: name || null,
+        role: role || "user",
+        department: department || null,
+      },
+      { onConflict: "id" }
+    );
 
   if (profileError) {
-    // Cleanup auth user if profile creation fails
+    // Cleanup auth user if profile upsert fails
     await adminClient.auth.admin.deleteUser(authUser.user.id);
     return NextResponse.json({ error: profileError.message }, { status: 500 });
   }
