@@ -81,7 +81,7 @@ ${
   });
 
   const result = streamText({
-    model: anthropicProvider("claude-sonnet-4-6"),
+    model: anthropicProvider("claude-3-5-sonnet-20241022"),
     system: systemPrompt,
     messages: validMessages,
     maxTokens: 2048,

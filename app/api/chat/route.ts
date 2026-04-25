@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
   });
 
   const result = streamText({
-    model: anthropicProvider("claude-sonnet-4-6"),
+    model: anthropicProvider("claude-3-5-sonnet-20241022"),
     system: COPILOTO_SYSTEM_PROMPT,
     messages: validMessages,
     maxTokens: 4096,
