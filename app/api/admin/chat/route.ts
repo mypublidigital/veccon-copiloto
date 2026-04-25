@@ -5,6 +5,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { ADMIN_ANALYST_SYSTEM_PROMPT } from "@/lib/system-prompt";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -88,11 +90,12 @@ ${
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const response = await anthropic.messages.stream({
-          model: "claude-3-5-sonnet-20241022",
+        const response = await anthropic.messages.create({
+          model: "claude-sonnet-4-5",
           max_tokens: 2048,
           system: systemPrompt,
           messages: validMessages,
+          stream: true,
         });
 
         for await (const event of response) {
