@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { createAnthropic } from "@ai-sdk/anthropic";
-import { streamText } from "ai";
+import Anthropic from "@anthropic-ai/sdk";
 import { COPILOTO_SYSTEM_PROMPT } from "@/lib/system-prompt";
 
 export const maxDuration = 60;
@@ -39,32 +38,42 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Nenhuma mensagem válida" }, { status: 400 });
   }
 
-  const anthropicProvider = createAnthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-  });
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return NextResponse.json(
+      { error: "ANTHROPIC_API_KEY não configurada" },
+      { status: 500 }
+    );
+  }
 
-  const result = streamText({
-    model: anthropicProvider("claude-3-5-sonnet-20241022"),
-    system: COPILOTO_SYSTEM_PROMPT,
-    messages: validMessages,
-    maxTokens: 4096,
-  });
+  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-  // Converte para SSE compatível com o frontend
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const chunk of result.textStream) {
-          const data = JSON.stringify({ delta: chunk });
-          controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+        const response = await anthropic.messages.stream({
+          model: "claude-3-5-sonnet-20241022",
+          max_tokens: 4096,
+          system: COPILOTO_SYSTEM_PROMPT,
+          messages: validMessages,
+        });
+
+        for await (const event of response) {
+          if (
+            event.type === "content_block_delta" &&
+            event.delta.type === "text_delta"
+          ) {
+            const data = JSON.stringify({ delta: event.delta.text });
+            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
+          }
         }
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
         console.error("Stream error:", err);
+        const message = err instanceof Error ? err.message : "Erro interno";
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ error: "Erro interno" })}\n\n`
+            `data: ${JSON.stringify({ error: message })}\n\n`
           )
         );
       } finally {
