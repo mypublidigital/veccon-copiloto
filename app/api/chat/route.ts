@@ -1,83 +1,47 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/lib/supabase/server";
-import Anthropic from "@anthropic-ai/sdk";
-import { COPILOTO_SYSTEM_PROMPT } from "@/lib/system-prompt";
+import { NextRequest } from "next/server";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
 
-export async function POST(req: NextRequest) {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Não autorizado" }, { status: 401 });
-  }
-
-  const { messages } = await req.json();
-
-  if (!messages || !Array.isArray(messages)) {
-    return NextResponse.json({ error: "Mensagens inválidas" }, { status: 400 });
-  }
-
-  const validMessages = (messages as { role: string; content: string }[])
-    .filter(
-      (m) =>
-        (m.role === "user" || m.role === "assistant") &&
-        typeof m.content === "string" &&
-        m.content.trim().length > 0
-    )
-    .map((m) => ({
-      role: m.role as "user" | "assistant",
-      content: m.content,
-    }));
-
-  if (validMessages.length === 0) {
-    return NextResponse.json({ error: "Nenhuma mensagem válida" }, { status: 400 });
-  }
-
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json(
-      { error: "ANTHROPIC_API_KEY não configurada" },
-      { status: 500 }
-    );
-  }
-
-  const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// VERSÃO DIAGNÓSTICA — não chama Anthropic, só testa streaming SSE no Vercel
+export async function POST(_req: NextRequest) {
+  console.log("[DIAG] Request received at /api/chat");
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        const response = await anthropic.messages.stream({
-          model: "claude-3-5-sonnet-20241022",
-          max_tokens: 4096,
-          system: COPILOTO_SYSTEM_PROMPT,
-          messages: validMessages,
-        });
+        console.log("[DIAG] Stream start callback executing");
 
-        for await (const event of response) {
-          if (
-            event.type === "content_block_delta" &&
-            event.delta.type === "text_delta"
-          ) {
-            const data = JSON.stringify({ delta: event.delta.text });
-            controller.enqueue(encoder.encode(`data: ${data}\n\n`));
-          }
+        // Evento sentinel imediato
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ delta: "PING " })}\n\n`)
+        );
+        console.log("[DIAG] Sent PING");
+
+        // 5 chunks com delays para simular streaming real
+        for (let i = 0; i < 5; i++) {
+          await new Promise((r) => setTimeout(r, 300));
+          const text = `chunk-${i} `;
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify({ delta: text })}\n\n`)
+          );
+          console.log(`[DIAG] Sent chunk-${i}`);
         }
+
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        console.log("[DIAG] Sent DONE");
       } catch (err) {
-        console.error("Stream error:", err);
-        const message = err instanceof Error ? err.message : "Erro interno";
+        console.error("[DIAG] Error in stream:", err);
         controller.enqueue(
           encoder.encode(
-            `data: ${JSON.stringify({ error: message })}\n\n`
+            `data: ${JSON.stringify({ error: String(err) })}\n\n`
           )
         );
       } finally {
         controller.close();
+        console.log("[DIAG] Stream closed");
       }
     },
   });
@@ -86,7 +50,6 @@ export async function POST(req: NextRequest) {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     },
   });
